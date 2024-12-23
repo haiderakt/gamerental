@@ -1,12 +1,8 @@
-import tkinter as tk
-from tkinter import ttk, messagebox, font
+from mysql.connector import connect, Error
+from tkinter import messagebox
 import logging
-import mysql.connector
-from mysql.connector import Error
-import sys
-import time
-from datetime import datetime
-import threading
+import tkinter as tk
+from tkinter import ttk
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -15,32 +11,20 @@ class GameRentalSystem:
     def __init__(self, root):  # Modified to accept root
         logger.debug("Initializing GameRentalSystem...")
         self.root = root
-        self.connect_with_retry()
-
-    def connect_with_retry(self, max_attempts=3):
-        def connect():
-            attempt = 0
-            while attempt < max_attempts:
-                try:
-                    logger.debug(f"Database connection attempt {attempt + 1}")
-                    self.db = mysql.connector.connect(
-                        host="localhost",
-                        port=3306,  # Default MySQL port
-                        user="root",
-                        password="haiderr",  # Use your password
-                        auth_plugin='mysql_native_password'
-                    )
-                    logger.debug("Database connection successful")
-                    break
-                except Error as e:
-                    logger.error(f"Error connecting to database: {e}")
-                    attempt += 1
-                    time.sleep(5)  # Wait before retrying
-            else:
-                messagebox.showerror("Connection Error", "Failed to connect to the database after several attempts.")
-                self.root.quit()
-
-        threading.Thread(target=connect).start()
+        try:
+            self.db = connect(
+                host="localhost",
+                user="root",
+                database="gamrentaldb",
+                password="haiderr",
+                auth_plugin='mysql_native_password'
+            )
+            self.cursor = self.db.cursor()
+            logger.debug("Database connection successful")
+        except Error as e:
+            logger.error(f"Error connecting to database: {e}")
+            messagebox.showerror("Connection Error", "Failed to connect to the database.")
+            self.root.quit()
 
     def close(self):
         if self.db.is_connected():
@@ -80,6 +64,17 @@ class GameRentalSystem:
         except Error as err:
             logger.error(f"Error adding rental: {err}")
             return False
+
+    def add_staff(self, name, position, email):
+        try:
+            query = "INSERT INTO staff (name, position, email) VALUES (%s, %s, %s)"
+            self.cursor.execute(query, (name, position, email))
+            self.db.commit()
+            logger.info(f"Staff member {name} added successfully")
+            return True
+        except Error as err:
+            logger.error(f"Error adding staff member: {err}")
+        return False
 
 class ModernGameRentalGUI:
     def __init__(self):
