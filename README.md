@@ -13,8 +13,6 @@ Create the Database:
 
 First, create the gamrentaldb database (if it doesn’t already exist) and use it:
 
-sql
-Copy code
 CREATE DATABASE IF NOT EXISTS gamrentaldb;
 USE gamrentaldb;
 Create Tables:
@@ -24,8 +22,6 @@ After creating and using the database, execute the following SQL statements to c
 Customers Table:
 Stores customer information, including their name, email, and phone number.
 
-sql
-Copy code
 CREATE TABLE customers (
     id INT PRIMARY KEY AUTO_INCREMENT,
     name VARCHAR(100) NOT NULL,
@@ -35,8 +31,6 @@ CREATE TABLE customers (
 Games Table:
 Stores details about the games available for rent, including their title, genre, price per day, and available copies.
 
-sql
-Copy code
 CREATE TABLE games (
     id INT PRIMARY KEY AUTO_INCREMENT,
     title VARCHAR(100) NOT NULL,
@@ -47,8 +41,6 @@ CREATE TABLE games (
 Staff Table:
 Stores information about staff members, including their name, email, and position in the shop.
 
-sql
-Copy code
 CREATE TABLE staff (
     id INT PRIMARY KEY AUTO_INCREMENT,
     name VARCHAR(100) NOT NULL,
@@ -58,8 +50,6 @@ CREATE TABLE staff (
 Rentals Table:
 Tracks rental transactions, linking customers, games, and staff. It also stores rental and return dates, as well as the total cost.
 
-sql
-Copy code
 CREATE TABLE rentals (
     id INT PRIMARY KEY AUTO_INCREMENT,
     customer_id INT,
@@ -72,6 +62,8 @@ CREATE TABLE rentals (
     FOREIGN KEY (game_id) REFERENCES games(id),
     FOREIGN KEY (staff_id) REFERENCES staff(id)
 );
+
+
 Requirements
 MySQL 5.7 or higher
 Basic knowledge of SQL and MySQL database management
