@@ -3,12 +3,13 @@ from tkinter import messagebox
 import logging
 import tkinter as tk
 from tkinter import ttk
+from datetime import datetime
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 class GameRentalSystem:
-    def __init__(self, root):  # Modified to accept root
+    def __init__(self, root):
         logger.debug("Initializing GameRentalSystem...")
         self.root = root
         try:
@@ -53,22 +54,59 @@ class GameRentalSystem:
             logger.error(f"Error adding game: {err}")
             return False
 
-    def add_rental(self, customer_id, game_id, staff_id):
+    def add_rental(self, customer_id, game_id, staff_id, rental_date=None, return_date=None):
         try:
-            query = """INSERT INTO rentals 
-                      (customer_id, game_id, staff_id, rental_date) 
-                      VALUES (%s, %s, %s, CURDATE())"""
-            self.cursor.execute(query, (customer_id, game_id, staff_id))
+        # Check if the game is available
+            self.cursor.execute("SELECT available_copies, price_per_day FROM games WHERE id = %s", (game_id,))
+            game_data = self.cursor.fetchone()
+            if not game_data:
+                logger.error(f"Game with ID {game_id} does not exist.")
+                return False
+            if game_data[0] <= 0:
+                logger.error("Game not available for rental.")
+                return False
+
+        # Calculate total cost (initial rental cost)
+            total_cost = game_data[1]  # Price per day from database
+
+        # Default rental_date to today if not provided
+            if rental_date is None:
+                rental_date = datetime.date.today()
+
+        # Start a transaction
+            self.cursor.execute("START TRANSACTION")
+
+        # Insert a rental record
+            rental_query = """
+            INSERT INTO rentals (customer_id, game_id, staff_id, rental_date, return_date, total_cost)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """
+            self.cursor.execute(rental_query, (customer_id, game_id, staff_id, rental_date, return_date, total_cost))
+
+        # Decrease available copies of the game
+            update_query = """
+            UPDATE games 
+            SET available_copies = available_copies - 1 
+            WHERE id = %s
+            """
+            self.cursor.execute(update_query, (game_id,))
+
+        # Commit the transaction
             self.db.commit()
+            logger.info(f"Rental successfully added for customer ID {customer_id}")
             return True
-        except Error as err:
+
+        except Exception as err:
+        # Roll back in case of an error
+            self.db.rollback()
             logger.error(f"Error adding rental: {err}")
             return False
+
 
     def add_staff(self, name, position, email):
         try:
             query = "INSERT INTO staff (name, position, email) VALUES (%s, %s, %s)"
-            self.cursor.execute(query, (name, position, email))
+            self.cursor.execute(query, (name, email, position))
             self.db.commit()
             logger.info(f"Staff member {name} added successfully")
             return True
@@ -114,6 +152,18 @@ class ModernGameRentalGUI:
         
         # Initialize tabs
         self.setup_tabs()
+
+        # Add menubar
+        self.menubar = tk.Menu(self.root)
+        self.root.config(menu=self.menubar)
+        
+        # Create View menu
+        self.view_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="View", menu=self.view_menu)
+        self.view_menu.add_command(label="Customers", command=self.show_customers)
+        self.view_menu.add_command(label="Games", command=self.show_games)
+        self.view_menu.add_command(label="Staff", command=self.show_staff)
+        self.view_menu.add_command(label="Rentals", command=self.show_rentals)
 
     def setup_styles(self):
         # Simplified styling
@@ -248,7 +298,6 @@ class ModernGameRentalGUI:
         rentals_frame = self.create_modern_frame(self.rentals_tab, "Rental Management")
         rentals_frame.pack(fill='both', expand=True, padx=10, pady=5)
 
-        # Input fields with modern styling
         input_frame = ttk.Frame(rentals_frame)
         input_frame.pack(fill='x', pady=10)
 
@@ -256,30 +305,79 @@ class ModernGameRentalGUI:
         customer_frame = ttk.Frame(input_frame)
         customer_frame.pack(fill='x', pady=5)
         ttk.Label(customer_frame, text="Customer").pack(side='left')
-        self.customer_select = ttk.Combobox(customer_frame)
-        self.customer_select.pack(side='right', expand=True, fill='x', padx=10)
+        self.rental_customer = ttk.Combobox(customer_frame, state='readonly')
+        self.rental_customer.pack(side='right', expand=True, fill='x', padx=10)
+        self.load_customers_combo()
 
         # Game selection
         game_frame = ttk.Frame(input_frame)
         game_frame.pack(fill='x', pady=5)
         ttk.Label(game_frame, text="Game").pack(side='left')
-        self.game_select = ttk.Combobox(game_frame)
-        self.game_select.pack(side='right', expand=True, fill='x', padx=10)
+        self.rental_game = ttk.Combobox(game_frame, state='readonly')
+        self.rental_game.pack(side='right', expand=True, fill='x', padx=10)
+        self.load_games_combo()
 
         # Staff selection
         staff_frame = ttk.Frame(input_frame)
         staff_frame.pack(fill='x', pady=5)
         ttk.Label(staff_frame, text="Staff").pack(side='left')
-        self.staff_select = ttk.Combobox(staff_frame)
-        self.staff_select.pack(side='right', expand=True, fill='x', padx=10)
+        self.rental_staff = ttk.Combobox(staff_frame, state='readonly')
+        self.rental_staff.pack(side='right', expand=True, fill='x', padx=10)
+        self.load_staff_combo()
 
-        # Add button with hover effect
+        # Rental Date
+        rental_date_frame = ttk.Frame(input_frame)
+        rental_date_frame.pack(fill='x', pady=5)
+        ttk.Label(rental_date_frame, text="Rental Date").pack(side='left')
+        self.rental_date = ttk.Entry(rental_date_frame)
+        self.rental_date.insert(0, datetime.now().strftime('%Y-%m-%d'))
+        self.rental_date.pack(side='right', expand=True, fill='x', padx=10)
+
+        # Return Date
+        return_date_frame = ttk.Frame(input_frame)
+        return_date_frame.pack(fill='x', pady=5)
+        ttk.Label(return_date_frame, text="Return Date (Optional)").pack(side='left')
+        self.return_date = ttk.Entry(return_date_frame)
+        self.return_date.pack(side='right', expand=True, fill='x', padx=10)
+
+        # Add button
         add_btn = self.create_modern_button(
             rentals_frame,
-            "Create Rental",
-            self.add_rental
+            "Add Rental",
+            lambda: self.add_rental_record()
         )
         add_btn.pack(pady=10)
+
+    def load_customers_combo(self):
+        self.system.cursor.execute("SELECT id, name FROM customers")
+        customers = self.system.cursor.fetchall()
+        self.rental_customer['values'] = [f"{id} - {name}" for id, name in customers]
+
+    def load_games_combo(self):
+        self.system.cursor.execute("SELECT id, title FROM games WHERE available_copies > 0")
+        games = self.system.cursor.fetchall()
+        self.rental_game['values'] = [f"{id} - {title}" for id, title in games]
+
+    def load_staff_combo(self):
+        self.system.cursor.execute("SELECT id, name FROM staff")
+        staff = self.system.cursor.fetchall()
+        self.rental_staff['values'] = [f"{id} - {name}" for id, name in staff]
+
+    def add_rental_record(self):
+        try:
+            customer_id = int(self.rental_customer.get().split(' - ')[0])
+            game_id = int(self.rental_game.get().split(' - ')[0])
+            staff_id = int(self.rental_staff.get().split(' - ')[0])
+            rental_date = self.rental_date.get()
+            return_date = self.return_date.get() if self.return_date.get() else None
+
+            if self.system.add_rental(customer_id, game_id, staff_id, rental_date, return_date):
+                messagebox.showinfo("Success", "Rental added successfully!")
+                self.load_games_combo()  # Refresh available games
+            else:
+                messagebox.showerror("Error", "Failed to add rental")
+        except ValueError:
+            messagebox.showerror("Error", "Please fill all required fields correctly")
 
     def setup_staff_tab(self):
         staff_frame = self.create_modern_frame(self.staff_tab, "Staff Management")
@@ -365,6 +463,75 @@ class ModernGameRentalGUI:
             self.customer_select.set('')
             self.game_select.set('')
             self.staff_select.set('')
+
+    def show_customers(self):
+        columns = ('ID', 'Name', 'Email', 'Phone')
+        query = "SELECT * FROM customers"
+        self.create_view_window("Customer List", columns, query)
+
+    def show_games(self):
+        columns = ('ID', 'Title', 'Genre', 'Price/Day', 'Copies')
+        query = "SELECT * FROM games"
+        self.create_view_window("Games List", columns, query)
+
+    def show_staff(self):
+        columns = ('ID', 'Name', 'Position', 'Contact')
+        query = "SELECT * FROM staff"
+        self.create_view_window("Staff List", columns, query)
+
+    def show_rentals(self):
+        columns = ('ID', 'Customer', 'Game', 'Staff', 'Rental Date', 'Return Date', 'Total Cost')
+        query = """
+        SELECT 
+            r.id,
+            c.name as customer_name,
+            g.title as game_title,
+            s.name as staff_name,
+            DATE_FORMAT(r.rental_date, '%Y-%m-%d') as rental_date,
+            IFNULL(DATE_FORMAT(r.return_date, '%Y-%m-%d'), 'Not Returned') as return_date,
+            CONCAT('$', FORMAT(r.total_cost, 2)) as total_cost
+        FROM rentals r
+        LEFT JOIN customers c ON r.customer_id = c.id
+        LEFT JOIN games g ON r.game_id = g.id
+        LEFT JOIN staff s ON r.staff_id = s.id
+        ORDER BY r.rental_date DESC
+        """
+        self.create_view_window("Rental Records", columns, query)
+
+    def create_view_window(self, title, columns, query):
+        try:
+            window = tk.Toplevel(self.root)
+            window.title(title)
+            window.geometry("1200x500")
+
+            frame = ttk.Frame(window)
+            frame.pack(fill='both', expand=True)
+
+            y_scroll = ttk.Scrollbar(frame, orient='vertical')
+            x_scroll = ttk.Scrollbar(frame, orient='horizontal')
+            
+            tree = ttk.Treeview(frame, yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
+            tree['columns'] = columns
+
+            tree.column('#0', width=0, stretch=tk.NO)
+            for col in columns:
+                tree.column(col, width=150)
+                tree.heading(col, text=col)
+
+            self.system.cursor.execute(query)
+            for row in self.system.cursor.fetchall():
+                tree.insert('', 'end', values=row)
+
+            y_scroll.config(command=tree.yview)
+            x_scroll.config(command=tree.xview)
+            
+            y_scroll.pack(side='right', fill='y')
+            x_scroll.pack(side='bottom', fill='x')
+            tree.pack(fill='both', expand=True)
+
+        except Error as err:
+            logger.error(f"Database error in {title}: {err}")
+            messagebox.showerror("Error", f"Failed to load {title.lower()} data")
 
 def main():
     app = ModernGameRentalGUI()
